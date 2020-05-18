@@ -1,5 +1,6 @@
 # AutoTrader
 Automated trading program using qtpylib
+Created in PyCharm
 
 Uses Geometric Brownian Motion as the base process in a Monte Carlo simulation, to predict a security's price in a given timedelta (i.e. in 1 hour).
 
