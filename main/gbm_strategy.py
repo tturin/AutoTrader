@@ -1,5 +1,6 @@
 from prediction_functions import CalculateGBM as GBM
 from prediction_functions import CalculateExtrema as Extrema
+from trade_functions import DetermineOrderParameters as DOP
 from qtpylib.algo import Algo
 
 import sys
@@ -36,7 +37,7 @@ class GBMAlgo(Algo):
         bars = instrument.get_bars()
         # print(list(bars))
         # print(bars)
-        print("LEN BARS: ", len(bars))
+        # print("LEN BARS: ", len(bars))
         if len(bars) < 1000:
             return
 
@@ -115,102 +116,84 @@ class GBMAlgo(Algo):
         ax.axhspan(fib_levels[2], fib_levels[1], alpha=0.5, color='palegreen')
         ax.axhspan(price_max, fib_levels[2], alpha=0.5, color='powderblue')
 
-        plt.show()
+        # plt.show()
 
         # Get closest support or resistance, depending if bull or bear
         # First make sure that there is no current position
         print("POSITIONS: ", positions)
 
-        if positions['position'] == 0 and resistances.size > 0 and supports.size > 0:
-            if self.direction == 1:
-                curr_resistance_index = np.abs(resistances - curr_price).argmin()
-                self.current_resistance = resistances.flat[curr_resistance_index]
-                if curr_resistance_index + 1 >= resistances.size:
-                    self.next_resistance = self.current_resistance
-                else:
-                    self.next_resistance = resistances.flat[curr_resistance_index + 1]
+        # Set the 2 closest spreads and resistances
+        if supports.size < 2 or resistances.size < 2 or len(fib_levels) == 0:
+            print("Not enough supports/resistances/fib levels")
+            return
 
-                # Set take profit level by getting fibonacci level
-                # closest to next resistance but above current resistance
-                fib_levels = np.asarray(fib_levels)
-                fib_above = np.argwhere(fib_levels > self.current_resistance)
-                print("FIB ABOVE: ", fib_above)
-                take_profit_index = np.abs(fib_above - self.next_resistance).argmin()
-                self.take_profit_level = fib_above.flat[take_profit_index]
-                print("Take profit: ", self.take_profit_level)
+        # Get position type (sell/buy) and modify if needed
+        if positions['position'] != 0:
+            print("THERE EXISTS A POSITION")
+            print(instrument.get_orders())
 
-                # Set stop loss level by getting first fibonacci level
-                # below current price
-                fib_below = np.argwhere(fib_levels < curr_price)
-                print("FIB BELOW: ", fib_below)
-                if fib_below.size > 0:
-                    stop_loss_index = np.abs(fib_below - curr_price).argmin()
-                    self.stop_loss_level = fib_below.flat[stop_loss_index]
-                else:
-                    self.stop_loss_level = supports[0]
-                print("Stop loss: ", self.stop_loss_level)
+            if positions['position'] == -1:
+                if curr_price < self.current_support:
+                    print("Modifying stop loss to current support: ", self.current_support)
+                    stop_order = instrument.get_active_order(order_type="STOP")
+                    instrument.move_stoploss(self.current_support)
 
-                # Send order
-                instrument.buy(quantity=1, target=self.take_profit_level, initial_stop=self.stop_loss_level)
+                    print("Modifying take profit to next support: ", self.next_support)
+                    # Need to get take profit order ID by filtering out the other orders
+                    print(instrument.get_active_order(order_type="MARKET"))
 
-            elif self.direction == -1:
-                abs_calc = np.abs(supports - curr_price)
-                curr_support_index = None
-                if abs_calc.size:
-                    curr_support_index = abs_calc.argmin()
+                    # Change current and next support/resistance levels
 
-                if curr_support_index is not None:
-                    self.current_support = supports.flat[curr_support_index]
-                    if curr_support_index + 1 >= supports.size:
-                        self.next_support = self.current_support
-                    else:
-                        self.next_support = supports.flat[curr_support_index + 1]
-                    print("CURRENT SUPPORT: ", self.current_support)
-                    print("NEXT SUPPORT: ", self.next_support)
+            elif positions['position'] == 1:
+                if curr_price > self.current_resistance:
+                    print("Modifying stop loss to current resistance: ", self.current_resistance)
+                    stop_order = instrument.get_active_order(order_type="STOP")
+                    instrument.move_stoploss(self.current_resistance)
+                    print("Modifying take profit to next resistance: ", self.next_resistance)
+                    print(instrument.get_active_order(order_type="MARKET"))
 
-                    # Set take profit level by getting next fib level
-                    # closest to next support but less than current support
-                    fib_levels = np.asarray(fib_levels)
-                    fib_below = np.argwhere(fib_levels < self.current_support)
-                    fib_below_support = None
-                    if self.next_support is not None:
-                        fib_below_support = np.abs(fib_below - self.next_support)
+            return
 
-                    # If there is no fib level under current support,
-                    # use next support
-                    if fib_below_support is not None and fib_below_support.size:
-                        self.take_profit_level = fib_below_support.argmin()
-                    else:
-                        self.take_profit_level = self.next_support
-                    print("Take profit: ", self.take_profit_level)
+        # Decide what order to make and at what levels
+        order_params = DOP.levels_order(self.direction, supports, resistances, fib_levels, bars)
+        print("ORDER PARAMS: ", order_params)
 
-                    # Set stop loss level by getting next fib level
-                    # above current price
-                    fib_above = np.argwhere(fib_levels > curr_price)
-                    fib_above_price = np.abs(fib_above - curr_price)
+        if self.direction == -1:
+            instrument.sell(quantity=1, target=order_params[1], initial_stop=order_params[0])
+        elif self.direction == 1:
+            instrument.buy(quantity=1, target=order_params[1], initial_stop=order_params[0])
 
-                    # If there is no fib above price, use a resistance level above
-                    if fib_above_price.size:
-                        # self.stop_loss_level = fib_above_price.argmin()
-                        self.stop_loss_level = fib_above_price[len(fib_above_price) - 1][0]
-                    else:
-                        self.stop_loss_level = resistances.flat[0]
-                    # print("FIB ABOVE: ", fib_above)
-                    # print("FIB ABOVE PRICE: ", fib_above_price)
-                    print("Stop loss: ", self.stop_loss_level)
+        # Set current supports/resistances to 1st levels after 2x commission
+        commission = order_params[2] / 3
+        commission = commission * 2
+        support_level = supports[supports < curr_price - commission]
+        resistance_level = resistances[resistances > curr_price + commission]
 
-                    # Send order
-                    instrument.sell(quantity=1, target=self.take_profit_level, initial_stop=self.stop_loss_level)
+        if support_level.size > 0:
+            self.current_support = supports[-1]
+        if resistance_level.size > 0:
+            self.current_resistance = resistances[0]
+
+        # Set next support/resistance levels as (if exists):
+        #   2nd levels after current price + returned commission
+        # If does not exist, then do not change take profit levels
+        support_level = supports[supports < curr_price - order_params[2]]
+        resistance_level = resistances[resistances > curr_price + order_params[2]]
+
+        if support_level.size > 1:
+            self.next_support = support_level[-2]
+        if resistance_level.size > 0:
+            self.next_resistance = resistance_level[1]
 
 
 if __name__ == "__main__":
     strategy = GBMAlgo(
-        instruments=[("UAA", "STK", "SMART", "USD", "", 0.0, "")],
-        resolution="1T",
+        instruments=[("AMD", "STK", "SMART", "USD", "", 0.0, "")],
+        resolution="15T",
         bar_window=1000,
         # tick_window=1000,
         # preload="1000T",
-        preload="12H",
+        preload="10D",
         # timezone='UTC',
         ibport=7497,
         backtest=False,

@@ -4,6 +4,7 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/main" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/prediction_functions" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/trade_functions" isTestSource="false" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
